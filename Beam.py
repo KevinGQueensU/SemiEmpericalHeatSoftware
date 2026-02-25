@@ -3,7 +3,7 @@ import numpy as np
 # BEAM CLASS used to calculate energy gradient in heat equation
 class Beam:
     # Beam can have a Gaussian, Gaussian Annular, or a combination shape
-    TYPES = ('Gaussian', 'Annular', 'Both')
+    TYPES = ('Rectangular', 'Gaussian', 'Annular', 'Both')
 
     # CONSTRUCTOR: Defines the particle beam properties and shape, with additional optional divergence parameters
     # Beam is taken to be propagating along the x-axis direction
@@ -12,11 +12,12 @@ class Beam:
                  I_0: float,  # Initial Intenisty [1/s]
                  Z: int,      # Beam particle atomic number
                  A: int = 1,  # OPTIONAL Beam particle mass number (for isotopes)
+                 L: float = 0, W: float = 0,
                  frac_gauss: float = 1,    # OPTIONAL fraction of beam that is Gaussian shaped (f_annular = 1 - f_gauss)
                  sig_ga_y0: float = 0,  sig_ga_z0: float = 0, # OPTIONAL Initial Gaussian beam STD along y and z directions
                  sig_an_y0: float = 0, sig_an_z0: float = 0,  # OPTIONAL Initial Gaussian Annular beam STD along y and z directions
                  mu_y0: float = 0,  mu_z0: float = 0,         # OPTIONAL Initial Gaussian Annular beam mean along y and z directions
-                 type: str = 'Gaussian',    # OPTIONAL Type of beam, default is Gaussian
+                 type: str = 'Rectangular',    # OPTIONAL Type of beam, default is Gaussian
                  dim: float = 2             # OPTIONAL: is beam 2D or 3D
                  ):
         # TEST: Make sure the defined beam type is valid
@@ -43,7 +44,8 @@ class Beam:
         self.A = A
         self.Z = Z
         self.dim = dim
-
+        self.L = L
+        self.W = W
         self.frac_gauss = frac_gauss
         self.frac_ann = 1 - frac_gauss # f_gauss + f_ann SHOULD ALWAYS ADD UP TO 1
         self.sig_ga_y0 = sig_ga_y0 ; self.sig_ga_z0 = sig_ga_z0
@@ -57,6 +59,10 @@ class Beam:
            alpha: float,    # Beam divergence angle along y direction
            beta: float      # Beam divergence angle along z direction
     ):
+        if(self.type == 'Rectangular'):
+            masky = (y <= (self.L/2)) &  (y >= (-self.L/2))
+            maskz = (z <= self.W/2) & (z >= (-self.W/2))
+            return self.P_0 / (self.L * self.W) * masky * maskz
         # Initializing Gaussian and Annular power densities to 0
         PD_gauss = 0
         PD_ann = 0

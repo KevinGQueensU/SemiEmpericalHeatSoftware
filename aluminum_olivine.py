@@ -7,26 +7,28 @@ import Simulation as sim
 from fipy.tools import numerix as nx
 import scipy as sp
 
-I_0 = 3.12e12 # [s^-1] 0.5 muAmps
-E_0 = 4.4e6  # [MeV]
-r = 1e-6 # m
+
+
+I_0 = 2.5e15 # [s^-1] 0.5 muAmps
+E_0 = 4e6  # [MeV]
+r = 0.5e-2 # m
 sig_ga_y0 = r
 sig_ga_z0 = r
 Z = 1
 beam = Beam(E_0, I_0, Z, sig_ga_y0=sig_ga_y0, sig_ga_z0=sig_ga_z0, dim = 3)
 
-Lx_Al = 147e-6
-Ly_Al = 10e-6
+Lx_Al = 50e-6
+Ly_Al = 2e-2
 Lz_Al = Ly_Al
 
-Lx_Ol = 10e-5
+Lx_Ol = 50e-6
 Ly_Ol = Ly_Al
 Lz_Ol = Lz_Al
 
 Ly = Ly_Al
 Lz = Lz_Al
 dx = 1e-6
-dy = 0.5e-6
+dy = 0.5e-3
 dz = dy
 
 
@@ -110,10 +112,10 @@ A_Al = 27 #g/mol
 Al = Atom('Al', Z_Al, A_Al, 1)
 rho_Al = 2700 # kg/m^3
 x0_Al = 0
+
 aluminum = Medium(rho_Al, C_Al, k_Al,
               Al, Lx_Al, Ly_Al, Lz_Al,
-              "Al//Hydrogen in Aluminum.txt", x0=x0_Al, name = 'Al')
-
+              "Al//Hydrogen in Aluminum.txt", x0=Lx_Ol, name = 'Aluminum')
 
 def C_olivine(T):
     M = 0.14069  # kg/mol
@@ -150,15 +152,16 @@ Z_O = 8
 A_O = 15.999  # g/mol
 O = Atom('O', Z_O, A_O, 0.4444)
 
+
 olivine = Medium(rho_olivine, C_olivine, k_olivine,
                 [Mg, Fe, Si, O],
                 Lx_Ol, Ly_Ol, Lz_Ol,
                 "Olivine//Hydrogen in Olivine.txt",
-                x0 = Lx_Al, name = 'OL')
+                x0 = 0, name = 'Olivine')
 
 # Actual Sim
-mediums = [aluminum, olivine]
+mediums = [olivine, aluminum]
 
-BC = BoundaryConditions(['None', 'Fixed', 'None', 'BBR', 'BBR', 'BBR'], 273, 298, eps= 0.05)
+BC = BoundaryConditions(['BBR', 'BBR', 'Fixed', 'BBR', 'BBR', 'BBR'], 298, 298, eps= 0.05)
 ts, Ts = sim.heateq_solid_3d(beam, mediums, BC, Ly, Lz,10000, dt =  1e-6, alpha = 0, beta = 0,
-                             dx=dx, dy=dy, dz=dz, view=True, dt_ramp=2, dT_target = 500, x_units='µm')
+                             dx=dx, dy=dy, dz=dz, view=True, dt_ramp=2, dT_target = 500, x_units='µm', y_units = 'cm', z_units='cm')

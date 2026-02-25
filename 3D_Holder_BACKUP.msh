@@ -1,0 +1,18 @@
+$MeshFormat
+2.2 0 8
+$EndMeshFormat
+$PhysicalNames
+6
+2 52 "BBR"
+2 53 "Interface"
+2 54 "Fixed"
+3 49 "Tantalum"
+3 50 "Olivine"
+3 51 "Aluminum"
+$EndPhysicalNames
+$Nodes
+0
+$EndNodes
+$Elements
+0
+$EndElements

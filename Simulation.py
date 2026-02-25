@@ -1,6 +1,6 @@
 from Medium import Medium
 from Beam import Beam
-from BoundaryConditions import BoundaryConditions
+from BoundaryConditions import BoundaryConditions, BoundaryConditionsGmsh
 import numpy as np
 from collections.abc import Callable
 import bisect
@@ -446,23 +446,23 @@ def heateq_solid_2d(
 def heateq_solid_3d(beam: Beam,
                     medium: Medium | list[Medium],
                     BC: BoundaryConditions,
-                    Ly: float, Lz: float,   # YZ Dimensions of medium
-                    t: float,               # Total simulation time [s]
-                    T0: float = 298,        # OPTIONAL: Initial simulation temperature [K]
-                    SE=None,                # OPTIONAL: Can give a pre-computed source energy term, otherwise it will compute it for you
+                    Ly: float, Lz: float,       # YZ Dimensions of medium
+                    t: float,                   # Total simulation time [s]
+                    T0: float = 298,            # OPTIONAL: Initial simulation temperature [K]
+                    SE=None,                    # OPTIONAL: Can give a pre-computed source energy term, otherwise it will compute it for you
                     x_shift=None, y_shift=None, z_shift = None,  # OPTIONAL: How much to shift the origin by
-                    alpha=0, beta=0,        # OPTIONAL: Beam divergence in y (alpha) and z (beta) directions
+                    alpha=0, beta=0,            # OPTIONAL: Beam divergence in y (alpha) and z (beta) directions
                     dx: float = 1e-4, dy: float = 1e-4, dz: float = 1e-4,           # OPTIONAL: Cell widths and heights
-                    dt: float = 1e-3,       # OPTIONAL: Time interval between steps
-                    view: bool = False,     # OPTIONAL: Enable viewer?
-                    view_freq: int = 2,     # OPTIONAL: Update viewer every N steps
-                    dT_target: float = None,# OPTIO
-                    # NAL: Scale dt so that a specific dT between steps can be achieved
-                    dt_ramp: float = None,  # OPTIONAL: Scaling factor to ramp dt by every step
-                    dt_max: float = 1,      # OPTIONAL: Set a maximum value that dt can ramp to
-                    x_units: str = 'mm', y_units: str = 'mm', z_units: str = 'mm', # OPTIONAL: Scale viewer axes to a specific unit
+                    dt: float = 1e-3,           # OPTIONAL: Time interval between steps
+                    view: bool = False,         # OPTIONAL: Enable viewer?
+                    view_freq: int = 2,         # OPTIONAL: Update viewer every N steps
+                    dT_target: float = None,    # OPTIONAL: Scale dt so that a specific dT between steps can be achieved
+                    dt_ramp: float = None,      # OPTIONAL: Scaling factor to ramp dt by every step
+                    dt_max: float = 1,          # OPTIONAL: Set a maximum value that dt can ramp to
+                    x_units: str = 'mm', y_units: str = 'mm', z_units: str = 'mm',  # OPTIONAL: Scale viewer axes to a specific unit
                     debug: bool = True
-                    ):
+                    ) -> [float, float]:
+
     import numpy as np
 
     # If only single material given, make it a list for ease of use later
@@ -607,13 +607,13 @@ def heateq_solid_3d(beam: Beam,
             A[:, :, iz].T, origin='lower',
             extent=[x0, x1, y0, y1], aspect='auto', cmap='turbo'
         )
-        axes[0].set_title(r'XY plane at z = $\frac{L_{z}}{2}$', fontsize=14)
+        axes[0].set_title(r'XY plane at z = $L_{z}/2$', fontsize=14)
 
         im_xz = axes[1].imshow(
             A[:, iy, :].T, origin='lower',
             extent=[x0, x1, z0, z1], aspect='auto', cmap='turbo'
         )
-        axes[1].set_title(r'XZ plane at y = $\frac{L_{y}}{2}$', fontsize=14)
+        axes[1].set_title(r'XZ plane at y = $L_{y}/2$', fontsize=14)
 
         im_yz = axes[2].imshow(
             A[ix, :, :].T, origin='lower',
@@ -660,7 +660,7 @@ def heateq_solid_3d(beam: Beam,
                 ha='center',
                 va='bottom',
                 fontsize=11,
-                color='gray',
+                color='black',
                 alpha=0.8,
                 transform=axes[0].transData
             )
@@ -671,7 +671,7 @@ def heateq_solid_3d(beam: Beam,
                 ha='center',
                 va='bottom',
                 fontsize=11,
-                color='gray',
+                color='black',
                 alpha=0.8,
                 transform=axes[1].transData
             )
@@ -679,8 +679,7 @@ def heateq_solid_3d(beam: Beam,
         cbar = fig.colorbar(im_yz)
         cbar.set_label("T [K]", fontsize=14)
         cbar.ax.tick_params(labelsize=12)
-
-        fig.subplots_adjust(left=0.06, right=0.98, bottom=0.18, top=0.88)
+        fig.subplots_adjust(left=0.06, right=0.94, bottom=0.18, top=0.88)
         return fig, A
 
     t_elapsed = 0.0
@@ -733,6 +732,198 @@ def heateq_solid_3d(beam: Beam,
 
             vmin = A.min()
             vmax = A.max()
+            T_maxes.append(vmax)
+            ts.append(t_elapsed)
+            print(f"step={step}  t={t_elapsed:.4e}s  T[min,max]=[{vmin:.2f}, {vmax:.2f}]  ΔT={vmax - vmin:.2f}")
+
+    if view:
+        plt.ioff()
+        plt.show()
+
+    return T_maxes, ts
+
+from fipy import Gmsh3D
+
+def heateq_solid_3d_test(
+    beam,
+    medium,
+    mesh,
+    BC,
+    t,
+    T0=298.0,
+    SE=None,
+    x_shift=0.0, y_shift=0.0, z_shift=0.0,
+    alpha=0.0, beta=0.0,
+    dt=1e-3,
+    view=False,
+    view_freq=2,
+    dT_target=None,
+    dt_ramp=None,
+    dt_max=1.0,
+    x_units="mm", y_units="mm", z_units="mm",
+    debug=True,
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from fipy import CellVariable, TransientTerm, DiffusionTerm
+
+    if not np.iterable(medium):
+        medium = [medium]
+
+    # cell center coords
+    x = mesh.cellCenters[0].value
+    y = mesh.cellCenters[1].value
+    z = mesh.cellCenters[2].value
+    nCells = mesh.numberOfCells
+
+    x_cm = x * 1e-2
+    y_cm = y * 1e-2
+    z_cm = z * 1e-2
+
+    # build material masks
+    tag_map = np.asarray(mesh.physicalCellMap).astype(int)  # (nCells,)
+
+    # If you used explicit ids in gmsh:
+    names = []
+    for name in mesh.physicalCells:
+        names.append(name)
+
+    masks = []
+    for med in medium:
+        if med.name not in names:
+            raise KeyError(f"Medium name '{med.name}' not in physical volumes={names}")
+        tag = names[med.name]
+        m = (tag_map == tag)
+        masks.append(m)
+
+    covered = np.zeros(nCells, dtype=int)
+    for m in masks:
+        covered += m.astype(int)
+    if (covered == 0).any() or (covered > 1).any():
+        raise RuntimeError(
+            f"Material masks bad: uncovered={(covered==0).sum()} overlap={(covered>1).sum()} "
+            f"tags={np.unique(tag_map)}"
+        )
+
+    # compute SE
+    if SE is None:
+        # 1D profile along +x
+        x_grid = np.linspace(0.0, float(x_cm.max()), 2000)
+        dEb_dx = np.zeros_like(x_grid)   # whatever compute_dEb_dx returns (likely eV/(m*s))
+        E_inst = np.zeros_like(x_grid)
+
+        for i, xi in enumerate(x_grid):
+            dEb_dx[i], E_inst[i] = compute_dEb_dx(xi, 0.0, 1e-4, beam, medium)
+
+        # interpolate onto cells by their x-position (meters)
+        dEb_dx_cells = np.interp(x_cm, x_grid, dEb_dx, left=0.0, right=0.0)
+        dEb_dx_cells *= 1.602176634e-19  # eV -> J  (keep only if compute_dEb_dx is eV/(m*s))
+
+        # beam profile evaluated at cell centers (use same unit system your beam expects)
+        phi_free = np.asarray(beam.PD(x_cm, y_cm, z_cm, alpha, beta))
+
+        SE_cells = dEb_dx_cells * phi_free / (beam.E_0 * beam.I_0)
+
+        if debug:
+            plt.figure()
+            plt.title("1D Beam Energy Gradient Profile")
+            plt.plot(x_grid, dEb_dx, "b.")
+            plt.xlabel("x [m]")
+            plt.ylabel("dEb/dx (raw units)")
+            plt.show()
+
+            plt.figure()
+            plt.title("Cell-wise volumetric source term SE")
+            plt.plot(x_cm, SE_cells, "b.", markersize=2)
+            plt.xlabel("x [m]")
+            plt.ylabel("SE [W/m^3] (as coded)")
+            plt.show()
+    else:
+        SE_cells = np.asarray(SE, dtype=float)
+        if SE_cells.shape != (nCells,):
+            raise ValueError(f"Provided SE must be shape {(nCells,)}, got {SE_cells.shape}")
+
+    # --- FiPy variables ---
+    T = CellVariable(mesh=mesh, value=float(T0), name="Temperature [K]", hasOld=True)
+    SE_var = CellVariable(mesh=mesh, value=SE_cells, name=r"$S_E$")
+    rhoC = CellVariable(mesh=mesh, name="rhoC")
+    k_cell = CellVariable(mesh=mesh, name="k")
+
+    def _manual_refresh_props():
+        current_T = T.value
+        new_rhoC = np.zeros(nCells)
+        new_k = np.zeros(nCells)
+
+        for med, m in zip(medium, masks):
+            cp_vals = med.get_C(current_T)
+            k_vals = med.get_k(current_T)
+            new_rhoC[m] = med.rho * cp_vals[m]
+            new_k[m] = k_vals[m]
+
+        if np.any(new_rhoC <= 0) or not np.isfinite(new_rhoC).all():
+            raise RuntimeError(f"rhoC bad: min={new_rhoC.min()}, zeros={(new_rhoC==0).sum()}")
+        if np.any(new_k <= 0) or not np.isfinite(new_k).all():
+            raise RuntimeError(f"k bad: min={new_k.min()}, zeros={(new_k==0).sum()}")
+
+        rhoC.setValue(new_rhoC)
+        k_cell.setValue(new_k)
+
+    k_face = k_cell.harmonicFaceValue
+    eq = TransientTerm(coeff=rhoC) == DiffusionTerm(coeff=k_face) + SE_var
+
+    if(view):
+        viewer = Viewer(vars=(T,))
+
+    # --- time loop ---
+    t_elapsed = 0.0
+    step = 0
+    T_maxes = []
+    ts = []
+
+    while t_elapsed < t:
+        T.updateOld()
+        T_old = T.value.copy()
+
+        _manual_refresh_props()
+        bcs = BC.update(mesh, T)
+        fixed_mask = np.asarray(BC.mats["Tantalum"]["Fixed"], dtype=bool)  # example
+        if dT_target is not None:
+            inner = 0
+            while True:
+                inner += 1
+                eq.solve(var=T, dt=dt, boundaryConditions = bcs)
+                dT_inf = float(np.max(np.abs(T.value - T_old)))
+                Tf = np.asarray(T.faceValue)
+
+                if dT_inf > dT_target:
+                    T.setValue(T_old)
+                    dt *= 0.5
+                    if dt < 1e-30:
+                        raise RuntimeError("dt underflow while enforcing dT_target")
+                else:
+                    break
+
+                if inner > 50:
+                    raise RuntimeError("Failed to satisfy dT_target after 50 inner attempts")
+        else:
+            eq.solve(var=T, dt=dt, boundaryConditions=bcs)
+
+        t_elapsed += dt
+        step += 1
+
+        # ramp dt
+        if dt_ramp is not None and dt < dt_max:
+            dt *= dt_ramp
+        if dt > dt_max:
+            dt = dt_max
+        if t_elapsed + dt > t:
+            dt = t - t_elapsed
+
+        if view and (step % max(1, view_freq) == 0):
+            viewer.plot()
+
+            vmin = float(T.value.min())
+            vmax = float(T.value.max())
             T_maxes.append(vmax)
             ts.append(t_elapsed)
             print(f"step={step}  t={t_elapsed:.4e}s  T[min,max]=[{vmin:.2f}, {vmax:.2f}]  ΔT={vmax - vmin:.2f}")
